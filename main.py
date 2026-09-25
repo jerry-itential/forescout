@@ -12,9 +12,10 @@ FORESCOUT_HOST may optionally include a ":port" suffix (default 443 otherwise).
 
 Forescout's Web API uses session-token auth: POST /api/login with a form-urlencoded
 username/password body returns the JWT as a RAW TEXT body (not JSON). That token is
-sent as the literal Authorization header value (no "Bearer " prefix) on every
-subsequent call. This script performs that login itself on every invocation -- no
-token is persisted between gateway 5 service calls.
+sent as "Authorization: Bearer <token>" on every subsequent call (confirmed against a
+live instance -- the vendor's own example clients send the bare token with no prefix,
+which is wrong for at least this instance/version). This script performs that login
+itself on every invocation -- no token is persisted between gateway 5 service calls.
 
 CLI flags override environment values -- useful for local testing.
 """
@@ -64,6 +65,15 @@ def request(conn, args):
         return {"success": False, "host": conn["host"], "device_name": conn["device_name"],
                 "error": f"login failed: {e}", "error_type": type(e).__name__}
 
+    # TEMPORARY diagnostic for the signature-mismatch investigation -- remove once resolved.
+    token_debug = {
+        "token_len": len(token),
+        "token_first_15": token[:15],
+        "token_last_15": token[-15:],
+        "token_starts_with_quote": token.startswith('"') or token.startswith("'"),
+        "token_ends_with_quote": token.endswith('"') or token.endswith("'"),
+    }
+
     method = (args.method or "GET").upper()
     path = args.path or ""
     if not path.startswith("/"):
@@ -89,7 +99,7 @@ def request(conn, args):
         resp = requests.request(
             method,
             f"{_base(conn)}{path}",
-            headers={"Authorization": token, "Content-Type": "application/x-www-form-urlencoded"},
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/x-www-form-urlencoded"},
             params=query,
             data=body,
             verify=conn["verify_ssl"],
@@ -99,7 +109,9 @@ def request(conn, args):
         return {"success": False, "host": conn["host"], "device_name": conn["device_name"],
                 "error": str(e), "error_type": type(e).__name__}
 
-    return _result(resp, conn)
+    result = _result(resp, conn)
+    result["token_debug"] = token_debug
+    return result
 
 
 def _ok(resp):
