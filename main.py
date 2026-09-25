@@ -23,6 +23,8 @@ CLI flags override environment values -- useful for local testing.
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
 
 import requests
@@ -114,6 +116,57 @@ def request(conn, args):
     return result
 
 
+def curl_diagnostic(conn, args):
+    """TEMPORARY: replays the login+call sequence via the curl binary instead of
+    `requests`, to isolate whether the JWT signature-mismatch issue is specific to
+    the requests/Python HTTP client or happens identically via curl. Runs from
+    wherever this script executes (e.g. inside gateway5), so it doesn't require
+    direct shell/curl access to the Forescout host itself."""
+    curl_bin = shutil.which("curl")
+    if not curl_bin:
+        return {"success": False, "host": conn["host"], "device_name": conn["device_name"],
+                "error": "curl binary not found in PATH on this execution host", "error_type": "EnvironmentError"}
+
+    base = _base(conn)
+    insecure = [] if conn["verify_ssl"] else ["-k"]
+
+    login_cmd = [curl_bin, "-s", "-w", "\n%{http_code}", *insecure, "-X", "POST",
+                 f"{base}/api/login", "-d", f"username={conn['user']}&password={conn['password']}"]
+    login_proc = subprocess.run(login_cmd, capture_output=True, text=True, timeout=conn["timeout"])
+    login_body, _, login_status = login_proc.stdout.rpartition("\n")
+    token = (login_body or login_proc.stdout).strip()
+
+    method = (args.method or "GET").upper()
+    path = args.path or "/api/hosts"
+    if not path.startswith("/"):
+        path = f"/{path}"
+
+    call_cmd = [curl_bin, "-s", "-w", "\n%{http_code}", *insecure, "-X", method,
+                "-H", f"Authorization: Bearer {token}", f"{base}{path}"]
+    call_proc = subprocess.run(call_cmd, capture_output=True, text=True, timeout=conn["timeout"])
+    call_body, _, call_status = call_proc.stdout.rpartition("\n")
+
+    return {
+        "success": call_status.strip() == "200",
+        "host": conn["host"],
+        "device_name": conn["device_name"],
+        "login": {
+            "http_status": login_status.strip(),
+            "returncode": login_proc.returncode,
+            "stderr": login_proc.stderr,
+            "token_len": len(token),
+            "token_first_15": token[:15],
+            "token_last_15": token[-15:],
+        },
+        "call": {
+            "http_status": call_status.strip(),
+            "returncode": call_proc.returncode,
+            "stderr": call_proc.stderr,
+            "body": call_body or call_proc.stdout,
+        },
+    }
+
+
 def _ok(resp):
     return 200 <= resp.status_code < 300
 
@@ -138,6 +191,7 @@ def _result(resp, conn):
 
 _DISPATCH = {
     "request": request,
+    "curl_diagnostic": curl_diagnostic,
 }
 
 
@@ -189,7 +243,8 @@ def _resolve_connection(args):
 
 def build_parser():
     p = argparse.ArgumentParser(description="Forescout Web API passthrough for gateway 5")
-    p.add_argument("--op", default="request", help="Action (only 'request' is supported)")
+    p.add_argument("--op", default="request", choices=["request", "curl_diagnostic"],
+                    help="'request' (default) or 'curl_diagnostic' (temporary, replays via curl instead of requests)")
 
     p.add_argument("--host",     default=None, help="Forescout appliance host/IP (overrides FORESCOUT_HOST secret)")
     p.add_argument("--user",     default=None, help="Web API username (overrides FORESCOUT_USERNAME secret)")
