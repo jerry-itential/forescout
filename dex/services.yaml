@@ -11,8 +11,7 @@ decorators:
       properties:
         method:
           type: string
-          description: "HTTP method (default POST)"
-          enum: ["GET", "POST", "PUT", "PATCH", "DELETE"]
+          description: "HTTP method: GET, POST, PUT, PATCH or DELETE (default POST)"
         path:
           type: string
           description: "Request path (default /fsapi/niCore/Lists)"
