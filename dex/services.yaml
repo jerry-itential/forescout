@@ -1,0 +1,41 @@
+repositories:
+  - name: forescout
+    url: git@github.com:jerry-itential/forescout.git
+
+decorators:
+  - name: forescout-dex-request
+    schema:
+      $id: forescout-dex-request
+      $schema: https://json-schema.org/draft/2020-12/schema
+      type: object
+      properties:
+        method:
+          type: string
+          description: "HTTP method (default POST)"
+          enum: ["GET", "POST", "PUT", "PATCH", "DELETE"]
+        path:
+          type: string
+          description: "Request path (default /fsapi/niCore/Lists)"
+        body:
+          type: string
+          description: "Raw FSAPI XML request body"
+      additionalProperties: false
+
+services:
+  - name: forescout-dex-request
+    type: python-script
+    description: Forescout DEX passthrough (raw FSAPI XML)
+    filename: main.py
+    working-directory: dex
+    repository: forescout
+    decorator: forescout-dex-request
+    secrets:
+      - name: forescout-host
+        type: env
+        target: FORESCOUT_HOST
+      - name: forescout-dex-user
+        type: env
+        target: FORESCOUT_DEX_USERNAME
+      - name: forescout-dex-password
+        type: env
+        target: FORESCOUT_DEX_PASSWORD
